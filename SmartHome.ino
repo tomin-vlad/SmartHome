@@ -5,16 +5,21 @@
 
 const byte PIN_DHT = 4;
 const byte PIN_RELAY = 5;
+const byte PIN_LED = 0;
 const char *SSID_NAME = "SmartHome";
-float SETPOINT = 33.0;
-float HYSTER = 3;
+float SETPOINT;
+float SETPOINT2;
+float HYSTER = 1;
+float HYSTER2 = 10;
 bool RELAY_STATE = false;
+bool LED_STATE = false;
 
 ESP8266WebServer HTTP(80);
 DHT dht(PIN_DHT, DHT11);
 
 void setup() {
   pinMode(PIN_RELAY, OUTPUT);
+  pinMode(PIN_LED, OUTPUT);
   Serial.begin(9600);
 
   WiFi.softAP(SSID_NAME);
@@ -27,6 +32,9 @@ void setup() {
   Serial.print("IP-адрес устройства: ");
   Serial.print(WiFi.softAPIP());
   Serial.println("\n");
+
+  SETPOINT = dht.readTemperature();
+  SETPOINT2 = dht.readHumidity();
 
   HTTP.on("/temperature", []() {
     HTTP.send(200, "text/plain", temperature());
@@ -48,6 +56,10 @@ void loop() {
   if (dht.readTemperature() > (SETPOINT + HYSTER)) RELAY_STATE = true;
   else if (dht.readTemperature() < (SETPOINT - HYSTER)) RELAY_STATE = false;  
   digitalWrite(PIN_RELAY, RELAY_STATE);
+
+  if (dht.readHumidity() < (SETPOINT2 - HYSTER2)) LED_STATE = true;
+  else if (dht.readHumidity() > (SETPOINT2 + HYSTER2)) LED_STATE = false;
+  digitalWrite(PIN_LED, LED_STATE);
 }
 
 String temperature() {
