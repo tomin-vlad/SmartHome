@@ -18,15 +18,17 @@
                 <img src="thermometer.svg" width="70" height="70" alt="thermometer">
                 <h2 class="title"><span id="temperature">NaN</span><sup>&deg;</sup>C</h2>
                 <p class="subtitle">Влажность: <span id="humidity">NaN</span>%</p>
+                <p class="setpoint"><span class="danger" id="setpoint_temperature">Температура не задана</span></p>
               </div>
             </div>
           </div>
           <div class="column">
             <div class="card">
               <div class="card-body">
-                <img src="toggle-off.svg" id="relay_img" width="70" height="70" alt="toggle">
-                <h2 class="title">Реле</h2>
-                <p class="subtitle">Статус: <span id="relay_state">выключено</span></p>
+                <img src="fan.svg" width="70" height="70" alt="fan">
+                <h2 class="title"><span id="relay_state">NaN</span></h2>
+                <p class="subtitle">Влажность: <span id="led_state">NaN</span></p>
+                <p class="setpoint"><span class="danger" id="setpoint_humidity">Влажность не задана</span></p>
               </div>
             </div>
           </div>
@@ -36,42 +38,99 @@
 
     <script>
       setInterval(function(){
-        var request = new XMLHttpRequest();
+        var request_dht = new XMLHttpRequest();
         // Получение и отображение данных о температуре и влажности
-        request.open('GET', '/temperature', true);
-        request.onload = function() {
-          if (request.readyState === 4 && request.status === 200) {
-            var response = request.responseText.split('|');
+        request_dht.open('GET', '/dht', true);
+        request_dht.onload = function() {
+          if (request_dht.readyState === 4 && request_dht.status === 200) {
+            var response_dht = request_dht.responseText.split('|');
 
             var temperature = document.querySelector('#temperature');
-            temperature.textContent = parseFloat(response[0]).toFixed(1);
+            temperature.textContent = parseFloat(response_dht[0]).toFixed(1);
 
             var humidity = document.querySelector('#humidity');
-            humidity.textContent = Math.round(response[1]);
+            humidity.textContent = Math.round(response_dht[1]);
           }
         }
-        request.send();
+        request_dht.send();
 
         // Получение и отображение данных о состоянии реле
-        var request2 = new XMLHttpRequest();
-        request2.open('GET', '/relay_status', true);
-        request2.onload = function() {
-          if (request2.readyState === 4 && request2.status === 200) {
-            var response2 = request2.responseText;
-            var relay_img = document.querySelector('#relay_img');
+        var request_relay = new XMLHttpRequest();
+        request_relay.open('GET', '/relay', true);
+        request_relay.onload = function() {
+          if (request_relay.readyState === 4 && request_relay.status === 200) {
+            var response_relay = request_relay.responseText;
             var relay_state = document.querySelector('#relay_state');
 
-            if (response2 == 1) {
-              relay_img.setAttribute('src', 'toggle-on.svg');
-              relay_state.textContent = 'включено';
+            if (response_relay == 1) {
+              relay_state.textContent = 'Вкл.';
             } else {
-              relay_img.setAttribute('src', 'toggle-off.svg');
-              relay_state.textContent = 'выключено';
+              relay_state.textContent = 'Выкл.';
             }
           }
         }
-        request2.send();
-      }, 1000);
+        request_relay.send();
+
+        // Получение и отображение данных о состоянии светодиода
+        var request_led = new XMLHttpRequest();
+        request_led.open('GET', '/led', true);
+        request_led.onload = function() {
+          if (request_led.readyState === 4 && request_led.status === 200) {
+            var response_led = request_led.responseText;
+            var led_state = document.querySelector('#led_state');
+            var sp_humd = document.querySelector('#setpoint_humidity').getAttribute('class');
+
+            if (sp_humd != 'danger') {
+              if (response_led == 1) {
+                led_state.innerHTML = '<span class="danger">Низкая</span>';
+              } else {
+                led_state.innerHTML = '<span class="success">Норма</span>';
+              }
+            } else {
+              led_state.textContent = 'NaN';
+            }
+          }
+        }
+        request_led.send();
+
+        // Получение и отображение данных об уставке по температуре
+        var request_temp = new XMLHttpRequest();
+        request_temp.open('GET', '/sp_temp', true);
+        request_temp.onload = function() {
+          if (request_temp.readyState === 4 && request_temp.status === 200) {
+            var response_temp = request_temp.responseText;
+            var sp_temp = document.querySelector('#setpoint_temperature');
+
+            if (response_temp != 'NaN') {
+              sp_temp.innerHTML = 'Темература задана: ' + parseFloat(response_temp).toFixed(1) + '<sup>&deg;</sup>C';
+              sp_temp.setAttribute('class', 'success');
+            } else {
+              sp_temp.textContent = 'Температура не задана';
+              sp_temp.setAttribute('class', 'danger');
+            }
+          }
+        }
+        request_temp.send();
+
+        // Получение и отображение данных об уставке по влажности
+        var request_humd = new XMLHttpRequest();
+        request_humd.open('GET', '/sp_humd', true);
+        request_humd.onload = function() {
+          if (request_humd.readyState === 4 && request_humd.status === 200) {
+            var response_humd = request_humd.responseText;
+            var sp_humd = document.querySelector('#setpoint_humidity');
+
+            if (response_humd != 'NaN') {
+              sp_humd.textContent = 'Влажность задана: ' + Math.round(response_humd) + '%';
+              sp_humd.setAttribute('class', 'success');
+            } else {
+              sp_humd.textContent = 'Влажность не задана';
+              sp_humd.setAttribute('class', 'danger');
+            }
+          }
+        }
+        request_humd.send();
+      }, 2000);
     </script>
   </body>
 </html>

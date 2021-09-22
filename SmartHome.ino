@@ -1,101 +1,147 @@
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include <FS.h>
-#include <DHT.h>
+#include <ESP8266WiFi.h> // Подключение библиотеки для создания точки доступа WiFi
+#include <ESP8266WebServer.h> // Подключение библиотеки для организации работы мини веб-сервера
+#include <FS.h> // Подключение библиотеки для работы с файловой системой Wemos D1 mini (ESP8266)
+#include <DHT.h> // Подключение библиотеки для работы с датчиком температуры и влажности DHT11
 
-const byte PIN_DHT = 4;
-const byte PIN_RELAY = 5;
-const byte PIN_LED = 0;
-const char *SSID_NAME = "SmartHome";
-float SETPOINT;
-float SETPOINT2;
-float HYSTER = 1;
-float HYSTER2 = 10;
-bool RELAY_STATE = false;
-bool LED_STATE = false;
+const byte PIN_RELAY = D1; // Пин подключения реле
+const byte PIN_DHT = D2; // Пин подключения датчика температуры и влажности
+const byte PIN_LED = D3; // Пин подключения светодиода
+const byte PIN_BUTTON_TEMPERATURE = D4; // Пин подключения кнопки фиксации температуры
+const byte PIN_BUTTON_HUMIDITY = D5; // Пин подключения кнопки фиксации влажности
 
-ESP8266WebServer HTTP(80);
-DHT dht(PIN_DHT, DHT11);
+const char *SSID_NAME = "SmartHome"; // Имя точки доступа WiFi
 
-void setup() {
-  pinMode(PIN_RELAY, OUTPUT);
-  pinMode(PIN_LED, OUTPUT);
-  Serial.begin(9600);
+float SETPOINT_TEMPERATURE; // Уставка темературы
+float SETPOINT_HUMIDITY; // Уставка влажности
+float HYSTER_TEMPERATURE = 0.5; // Гистерезис по температуре
+float HYSTER_HUMIDITY = 10; // Гистерезис по влажности
 
-  WiFi.softAP(SSID_NAME);
+bool RELAY_STATE = 0; // Статус реле (выключено по умолчанию)
+bool LED_STATE = 0; // Статус светодиода (выключен по умолчанию)
 
-  SPIFFS.begin();
-  HTTP.begin();
-  dht.begin();
+ESP8266WebServer HTTP(80); // Создаем объект для работы с веб-сервером на 80-м порту
+DHT dht(PIN_DHT, DHT11); // Создаем объект для работы с датчиком температуры и влажности
 
-  Serial.println("\nSmartHome");
-  Serial.print("IP-адрес устройства: ");
-  Serial.print(WiFi.softAPIP());
-  Serial.println("\n");
+void setup() { // Функция setup выполняется один раз при загрузке микроконтроллера
+  pinMode(PIN_RELAY, OUTPUT); // Объявляем пин реле как выход (будем считывать сигнал с пина микроконтроллера)
+  pinMode(PIN_LED, OUTPUT); // Объявляем пин светодиода как выход (будем считывать сигнал с пина микроконтроллера)
+  Serial.begin(9600); // Инициализируем вывод данных в серийный порт на скорости 9600 бод
 
-  SETPOINT = dht.readTemperature();
-  SETPOINT2 = dht.readHumidity();
+  WiFi.softAP(SSID_NAME); // Создаем точку доступа WiFi с указанным именем *SSID_NAME
 
-  HTTP.on("/temperature", []() {
-    HTTP.send(200, "text/plain", temperature());
+  SPIFFS.begin(); // Инициализируем работу с файловой системой микроконтроллера
+  HTTP.begin(); // Инициализируем работу с веб-сервером
+  dht.begin(); // Инициализируем работу с датчиком температуры и влажности
+
+  Serial.println("\nSmartHome"); // Выводим в монитор серийного порта сообщение с названием нашего устройства
+  Serial.print("IP-адрес устройства: "); // Выводим в монитор серийного порта сообщение о том, что сейчас будем выводить IP-адрес устройства
+  Serial.print(WiFi.softAPIP()); // Выводим в монитор серийного порта локальный IP-адрес устройства (для подключения в рамках созданной WiFi точки доступа)
+  Serial.println("\n"); // Перенос строки
+
+  HTTP.on("/dht", []() { // Обработка обращения по URL-адресу датчика температуры
+    HTTP.send(200, "text/plain", dht11()); // Сервер отправляет код состояния 200 (все ОК) с заголовком text/plain и вызывает функцию dht11()
   });
 
-  HTTP.on("/relay_status", []() {
-    HTTP.send(200, "text/plain", relay_status());
+  HTTP.on("/relay", []() { // Обработка обращения по URL-адресу реле
+    HTTP.send(200, "text/plain", relay()); // Сервер отправляет код состояния 200 (все ОК) с заголовком text/plain и вызывает функцию relay()
   });
 
-  HTTP.onNotFound([]() {
-    if (!handleFileRead(HTTP.uri()))
-      HTTP.send(404, "text/plain", "Not Found");
+  HTTP.on("/led", []() { // Обработка обращения по URL-адресу светодиода
+    HTTP.send(200, "text/plain", led()); // Сервер отправляет код состояния 200 (все ОК) с заголовком text/plain и вызывает функцию led()
+  });
+
+  HTTP.on("/sp_temp", []() { // Обработка обращения по URL-адресу уставки температуры
+    HTTP.send(200, "text/plain", sp_temp()); // Сервер отправляет код состояния 200 (все ОК) с заголовком text/plain и вызывает функцию sp_temp()
+  });
+
+  HTTP.on("/sp_humd", []() { // Обработка обращения по URL-адресу уставки влажности
+    HTTP.send(200, "text/plain", sp_humd()); // Сервер отправляет код состояния 200 (все ОК) с заголовком text/plain и вызывает функцию sp_humd()
+  });
+
+  HTTP.onNotFound([]() { // Обработка обращения по несуществующему URL
+    if (!handleFileRead(HTTP.uri())) // Если файл или страница по указанному URL не найдены, то...
+      HTTP.send(404, "text/plain", "Not Found"); // Сервер отправляет код состояния 404 (Page not found - страница не найдена) с заголовком text/plain и текстом Not Found
   });
 }
 
-void loop() {
+void loop() { // Функция loop - это бесконечный цикл, который выполняется постоянно, пока работает микроконтроллер
   HTTP.handleClient();
 
-  if (dht.readTemperature() > (SETPOINT + HYSTER)) RELAY_STATE = true;
-  else if (dht.readTemperature() < (SETPOINT - HYSTER)) RELAY_STATE = false;  
-  digitalWrite(PIN_RELAY, RELAY_STATE);
+  if (digitalRead(PIN_BUTTON_TEMPERATURE) == HIGH) { // Если кнопка фиксации температуры нажата (т.е. на пине кнопки присутствует 1), то...
+    SETPOINT_TEMPERATURE = dht.readTemperature(); // Записываем в переменную уставки температуры текущее значение температуры
+  }
 
-  if (dht.readHumidity() < (SETPOINT2 - HYSTER2)) LED_STATE = true;
-  else if (dht.readHumidity() > (SETPOINT2 + HYSTER2)) LED_STATE = false;
-  digitalWrite(PIN_LED, LED_STATE);
-}
+  if (digitalRead(PIN_BUTTON_HUMIDITY) == HIGH) { // Если кнопка фиксации влажности нажата (т.е. на пине кнопки присутствует 1), то...
+    SETPOINT_HUMIDITY = dht.readHumidity(); // Записываем в переменную уставки влажности текущее значение влажности
+  }
 
-String temperature() {
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
-  if (!isnan(h) && !isnan(t)) {
-    return String(t) + "|" + String(h);
-  } else {
-    return String("NaN");
+  if (SETPOINT_TEMPERATURE != 0.00) { // Если уставка по температуре установлена (считаем, что это значение - не 0.00), то...
+    if (dht.readTemperature() > (SETPOINT_TEMPERATURE + HYSTER_TEMPERATURE)) RELAY_STATE = true; // Если текущее значение температуры больше, чем уставка + гистерезис, то включаем реле
+    else if (dht.readTemperature() < (SETPOINT_TEMPERATURE - HYSTER_TEMPERATURE)) RELAY_STATE = false; // Если текущее значение температуры меньше, чем уставка - гистерезис, то выключаем реле 
+    digitalWrite(PIN_RELAY, RELAY_STATE); // Посылаем на пин реле значение статуса реле (0 или 1, см. выше)
+  }
+
+  if (SETPOINT_HUMIDITY != 0.00) { // Если уставка по влажности установлена (считаем, что это значение - не 0.00), то...
+    if (dht.readHumidity() < (SETPOINT_HUMIDITY - HYSTER_HUMIDITY)) LED_STATE = true; // Если текущее значение влажности меньше, чем уставка - гистерезис, то включаем светодиод
+    else if (dht.readHumidity() > (SETPOINT_HUMIDITY + HYSTER_HUMIDITY)) LED_STATE = false; // Если текущее значение влажности больше, чем уставка + гистерезис, то выключаем светодиод
+    digitalWrite(PIN_LED, LED_STATE); // Посылаем на пин светодиода значение статуса светодиода (0 или 1, см. выше)
   }
 }
 
-String relay_status() {
-  return String(digitalRead(PIN_RELAY));
-}
-
-bool handleFileRead(String path) {
-  if (path.endsWith("/")) path += "index.html";
-  String contentType = getContentType(path);
-  if (SPIFFS.exists(path)) {
-    File file = SPIFFS.open(path, "r");
-    size_t sent = HTTP.streamFile(file, contentType);
-    file.close();
-    return true;
+String dht11() { // Функция получения данных с датчика температуры и влажности DHT11
+  float t = dht.readTemperature(); // Получаем значение температуры и записываем его в переменную
+  float h = dht.readHumidity(); // Получаем значение влажности и записываем его в переменную
+  if (!isnan(t) && !isnan(h)) { // Проверяем: если значения переменных не являются неинциализированными, то...
+    return String(t) + "|" + String(h); // Возвращаем значения темературы и влажности, разделяя их разделителем | (вертикальная черта)
+  } else { // Проверяем: иначе, если значения переменных являются неинициализированными, то...
+    return String("NaN"); // Возвращаем NaN, что означает отсутствие данных с датчика
   }
-  return false;
 }
 
-String getContentType(String filename) {
-  if (filename.endsWith(".html")) return "text/html";
-  else if (filename.endsWith(".css")) return "text/css";
-  else if (filename.endsWith(".js")) return "application/javascript";
-  else if (filename.endsWith(".png")) return "image/png";
-  else if (filename.endsWith(".jpg")) return "image/jpeg";
-  else if (filename.endsWith(".svg")) return "image/svg+xml";
-  else if (filename.endsWith(".gif")) return "image/gif";
-  else if (filename.endsWith(".ico")) return "image/x-icon";
-  return "text/plain";
+String relay() { // Функция получения состояния реле
+  return String(RELAY_STATE); // Получаем и возвращаем значение сигнала с пина подключения реле (0 - реле выкл, 1 - реле вкл)
+}
+
+String led() { // Функция получения состояния светодиода
+  return String(LED_STATE); // Получаем и возвращаем значение сигнала с пина подключения светодиода (0 - светодиод выкл, 1 - светодиод вкл)
+}
+
+String sp_temp() { // Функция получения уставки температуры
+  if (SETPOINT_TEMPERATURE != 0.00) { // Если уставка по температуре установлена (считаем, что это значение - не 0.00), то...
+    return String(SETPOINT_TEMPERATURE); // Возвращаем текущее значение уставки температуры
+  } else { // Иначе, если уставка по температуре не установлена (считаем, что это значение - 0.00), то...
+    return String("NaN"); // Возвращаем NaN, что означает отсутствие уставки по температуре
+  }
+}
+
+String sp_humd() { // Функция получения уставки влажности
+  if (SETPOINT_HUMIDITY != 0.00) { // Если уставка по влажности установлена (считаем, что это значение - не 0.00), то...
+    return String(SETPOINT_HUMIDITY); // Возвращаем текущее значение уставки влажности
+  } else { // Иначе, если уставка по темературе не установлена (считаем, что это значение - 0.00), то...
+    return String("NaN"); // Вовзращаем NaN, что означает отсуствие уставки по влажности
+  }
+}
+
+bool handleFileRead(String path) { // Функция чтения файлов из файловой системы микроконтроллера
+  if (path.endsWith("/")) path += "index.html"; // Если путь оканчивается на / (слеш), то добавить index.html
+  String contentType = getContentType(path); // Получаем тип файла функцией getContentType (описана ниже)
+  if (SPIFFS.exists(path)) { // Если файл существует, то...
+    File file = SPIFFS.open(path, "r"); // Создаем объект file, открываем и читаем в него файл по указанному пути
+    size_t sent = HTTP.streamFile(file, contentType); // Отдаем через веб-сервер файл с полученным ранее типом файла
+    file.close(); // Закрываем файл
+    return true; // Возвращаем true функцией
+  }
+  return false; // Возвращаем false функцией
+}
+
+String getContentType(String filename) { // Функция получения типа файла
+  if (filename.endsWith(".html")) return "text/html"; // Если расширение файла заканчивается на .html, то возвращаем тип файла text/html
+  else if (filename.endsWith(".css")) return "text/css"; // Если расширение файла заканчивается на .css, то возвращаем тип файла text/css
+  else if (filename.endsWith(".js")) return "application/javascript"; // Если расширение файла заканчивается на .js, то возвращаем тип файла application/javascript
+  else if (filename.endsWith(".png")) return "image/png"; // Если расширение файла заканчивается на .png, то возвращаем тип файла image/png
+  else if (filename.endsWith(".jpg")) return "image/jpeg"; // Если расширение файла заканчивается на .jpg, то возвращаем тип файла image/jpeg
+  else if (filename.endsWith(".svg")) return "image/svg+xml"; // Если расширение файла заканчивается на .svg, то возвращаем тип файла image/svg+xml
+  else if (filename.endsWith(".gif")) return "image/gif"; // Если расширение файла заканчивается на .gif, то возвращаем тип файла image/gif
+  else if (filename.endsWith(".ico")) return "image/x-icon"; // Если расширение файла заканчивается на .ico, то возвращаем тип файла image/x-icon
+  return "text/plain"; // В ином случае возвращаем тип файла text/plain
 }
